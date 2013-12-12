@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title> D3 Tutorial </title>
+	<!--<script src="http://d3js.org/d3.v3.min.js"></script>-->
+	<script src="js/d3.v3.min.js" type="text/javascript"></script>
+	<script src="js/jquery-min.js" type="text/javascript" charset="utf-8"></script>
+	<link href="css/smoothness/jquery-ui-1.10.3.custom.min.css" type="text/css" rel="stylesheet"/>
+	<style>
+	div.tooltip {
+		position: absolute;
+		text-align:center;
+		width: 150px;
+		height: 30px;
+		padding: 5px;
+		font: 12px sans-serif;
+		background:lightsteelblue;
+		border:2px solid black;
+		border-radius:8px;
+	}
+	</style>
+</head>
+<body>
+	<form id="happyValForm" style="display:none">
+		<input id="spinHappy" type="spinner"/>
+	</form>
+	<script>
+	// Store browser window dimensions in variables
+	var window_width = $(window).width();
+	var window_height = $(window).height();
+	
+	// These are coded values from a "Moment" survey
+	var categories = [ [{key:0, string:"Indoors"}, 
+						{key:1, string:"Outdoors"}],
+					   [{key:0, string:"Home"},
+						 {key:1, string:"Work"},
+						 {key:2, string:"In Transit"},
+						 {key:3, string:"Public Place"},
+						 {key:4, string:"Other"}],
+					   [{key:0, string:"Alone"}, 
+						  {key:1, string:"Significant Other"},
+						  {key:2, string:"My Children"},
+						  {key:3, string:"Other Children"},
+						  {key:4, string:"Other Relatives"},
+						  {key:5, string:"Friends"},
+						  {key:6, string:"Co-Workers or Clients"},
+						  {key:7, string:"Strangers"},
+						  {key:8, string:"Other"}],
+					   [{key:0, string:"Activity 1"},
+						  {key:1, string:"Activity 2"},
+						  {key:2, string:"Activity 3"},
+						  {key:3, string:"Activity 4"},
+						  {key:4, string:"Activity 5"}
+					   ]];
+
+	var div_tooltip = d3.select("body")
+		.append("div")
+		.attr("class", "tooltip")
+		.attr("id", "div_tooltip")
+		.style("opacity", 0)
+		.on("click", function() {
+			div_tooltip.transition()
+				.duration(500)
+				.style("opacity", 0);
+		});
+
+	// Array of radii for donut chart
+	var r = [50, 75, 100, 125, 150, 175, 200];
+	var maxDim = Math.min(window_width, window_height);
+	var numRings = 5;
+	if (maxDim == window_height) {
+		var donutHeight = 0.7*(window_height);
+		var ringWidth = Math.floor(donutHeight/(numRings*2));
+	} else {
+		var donutWidth = 0.9*(window_width);
+		var ringWidth = Math.floor(donutWidth/(numRings*2));
+	}
+	
+	/* Expand the arc parameters among their own funcitons; 
+	 *	previous trouble accessing indexed loop variable
+	 */ 
+	arc0 = d3.svg.arc()
+			.innerRadius( ringWidth )
+			.outerRadius( ringWidth*2 )
+	
+	arc1 = d3.svg.arc()
+			.innerRadius( ringWidth*2 )
+			.outerRadius( ringWidth*3 )
+
+	arc2 = d3.svg.arc()
+		.innerRadius( ringWidth*3 )
+		.outerRadius( ringWidth*4 )
+
+	arc3 = d3.svg.arc()
+		.innerRadius( ringWidth*4 )
+		.outerRadius( ringWidth*5 )
+
+	/* Visulize binned values from a histogram within the 
+		donut chart arcs.
+	 */
+	hist0 = d3.layout.histogram()
+		.range([0,categories[0].length])
+		.bins(categories[0].length)
+		.value(function(d) {return d.inout;})
+
+	hist1 = d3.layout.histogram()
+		.range([0,categories[1].length])
+		.bins(categories[1].length)	
+		.value(function(d) {return d.location;})
+
+	hist2 = d3.layout.histogram()
+		.range([0,categories[2].length])
+		.bins(categories[2].length)	
+		.value(function(d) {return d.company;})
+
+	hist3 = d3.layout.histogram()
+		.range([0,categories[3].length])
+		.bins(categories[3].length)	
+		.value(function(d) {return d.activity;})
+
+	// Initialize happiness value
+	var happyVal = 2;
+	// create ordinal array of color values
+	var color = d3.scale.category20();
+	
+	// callback function to store data variable locally
+	var dataIn = null;
+	var paths = [];
+	function getData(data) {
+		dataIn = data;
+		keys = d3.keys(dataIn[0]);
+	}
+	function getPaths(path) {
+		paths = path;
+	}
+
+	//append the svg element to the DOM
+	var canvas = d3.select("body")
+			.append("svg")
+			.attr("width", window_width)
+			.attr("height", window_height)
+	
+	// append a group to the canvas	
+	var textgroup = canvas.append("g")
+		.attr("transform", "translate("+(window_width/2)+","+(window_height)/10+")")
+		.attr("id", "textgroup");
+
+	var group = canvas.append("g")
+		.attr("transform", "translate("+(window_width/2)+","+(window_height)/2+")");
+	
+	positiveSide = true;
+	
+	levelText = textgroup.append("text")
+		.attr("id", "levelText")
+		.attr("text-anchor", "middle")
+		.text(function() {
+			if (positiveSide) {
+				return "Happiness level > ";
+			} else {
+				return "Happiness level <=";
+			}})
+		.on("click", function(){togglePlots();});
+
+	happyText = textgroup.append("text")
+		.attr("id", "happyText")
+		.attr("text-anchor", "center")
+		.text(happyVal)
+		.on("click", function(){reSelectHappyVal();});
+
+	var textSize = 1;
+	while ( (document.getElementById("textgroup").getBBox().height < (0.1*window_height)) && (document.getElementById("textgroup").getBBox().width < (window_width)) ) {
+
+		levelText.attr("font-size", textSize+"px")
+			.attr("dx", "-"+document.getElementById("happyText").getBBox().width+"px");
+
+		happyText.attr("font-size", textSize+"px")
+			.attr("dx", 0.5*document.getElementById("levelText").getBBox().width + "px")
+		
+		textSize++;
+	}
+	
+
+		var pie = d3.layout.pie()
+			.sort(null)
+			.value(function (d) {
+				// d.y is mapped to the count of binned histogram values
+				return parseInt(d.y);
+			});
+
+
+		d3.csv('sampled3_csv.csv', function(data) {
+			dataKeys = d3.keys(data[0]);
+			getData(data);
+
+			path0 = group.selectAll(".arc0")
+				.data(pie(hist0(data.filter(function(d) {return d.happiness > happyVal;}))))
+				.enter()
+					.append("path")
+					.attr("stroke", "black")
+					.attr("stroke-width", "1px")
+					.attr("class", "arc0")
+					.attr("d", arc0)
+					.attr("fill", function(d,i) {
+						return d3.interpolateRgb(color(0), 
+							color(1))(i/categories[0].length);
+					})
+					.each(function(d) {this._current = d;})
+					.on("click", function(d,i) {
+						div_tooltip.transition()
+							.duration(200)
+							.style("background", d3.interpolateRgb(color(0), 
+								color(1))(i/categories[0].length)
+							)
+							.style("opacity", 0.9)
+							.style("left",  function() {
+								if ((d3.event.pageX + 150) > window_width) {return (d3.event.pageX - 150)+"px";
+								} else {
+									return d3.event.pageX + "px";
+								}
+							})
+							.style("top", (d3.event.pageY-20)+"px")
+							.text("You were "+categories[0][d.data[0].inout].string + " " + d.data.y + " times.");
+
+
+					});
+
+			path1 = group.selectAll(".arc1")
+				.data(pie(hist1(data.filter(function(d) {return d.happiness > happyVal;}))))
+				.enter()
+					.append("path")
+					.attr("stroke", "black")
+					.attr("stroke-width", "1px")
+					.attr("class", "arc1")
+					.attr("d", arc1)
+					.attr("fill", function(d,i) {
+						return d3.interpolateRgb(color(2), 
+							color(3))(i/categories[1].length);
+					})
+					.each(function(d) {this._current = d;})
+					.on("click", function(d,i) {
+						div_tooltip.transition()
+							.duration(200)
+							.style("background", d3.interpolateRgb(color(2), 
+								color(3))(i/categories[1].length)
+							)
+							.style("opacity", 0.9)
+							.style("left", function() {
+								if ((d3.event.pageX + 150) > window_width) {return (d3.event.pageX - 150)+"px";
+								} else {
+									return d3.event.pageX + "px";
+								}
+							})
+							.style("top", (d3.event.pageY-20)+"px")
+							.text("You were at "+categories[1][d.data[0].location].string + " " + d.data.y + " times.");
+
+
+					});
+
+			path2 = group.selectAll(".arc2")
+				.data(pie(hist2(data.filter(function(d) {return d.happiness > happyVal;}))))
+				.enter()
+					.append("path")
+					.attr("stroke", "black")
+					.attr("stroke-width", "1px")
+					.attr("class", "arc2")
+					.attr("d", arc2)
+					.attr("fill", function(d,i) {
+						return d3.interpolateRgb(color(4), 
+							color(5))(i/categories[2].length);
+					})
+					.each(function(d) {this._current = d;})
+					.on("click", function(d,i) {
+						div_tooltip.transition()
+							.duration(200)
+							.style("background", d3.interpolateRgb(color(4), 
+								color(5))(i/categories[2].length)
+							)
+							.style("opacity", 0.9)
+							.style("left",  function() {
+								if ((d3.event.pageX + 150) > window_width) {return (d3.event.pageX - 150)+"px";
+								} else {
+									return d3.event.pageX + "px";
+								}
+							})
+							.style("top", (d3.event.pageY-20)+"px")
+							.text("You were with "+categories[2][d.data[0].company].string + " " + d.data.y + " times.");
+
+
+					});
+
+			path3 = group.selectAll(".arc3")
+				.data(pie(hist3(data.filter(function(d) {return d.happiness > happyVal;}))))
+				.enter()
+					.append("path")
+					.attr("stroke", "black")
+					.attr("stroke-width", "1px")
+					.attr("class", "arc3")
+					.attr("d", arc3)
+					.attr("fill", function(d,i) {
+						return d3.interpolateRgb(color(6), 
+							color(7))(i/categories[3].length);
+					})
+					.each(function(d) {this._current = d;})
+					.on("click", function(d,i) {
+						div_tooltip.transition()
+							.duration(200)
+							.style("background", d3.interpolateRgb(color(6), 
+								color(7))(i/categories[3].length)
+							)
+							.style("opacity", 0.9)
+							.style("left",  function() {
+								if ((d3.event.pageX + 150) > window_width) {return (d3.event.pageX - 150)+"px";
+								} else {
+									return d3.event.pageX + "px";
+								}
+							})
+							.style("top", (d3.event.pageY-20)+"px")
+							.text("You were "+categories[3][d.data[0].activity].string + " " + d.data.y + " times.");
+
+
+					});
+		});
+		
+		function togglePlots() {
+			positiveSide = !positiveSide;
+			d3.selectAll("#levelText")
+				.text(function() {
+					if (positiveSide) {
+						return "Happiness level > ";
+					} else {
+						return "Happiness level <=";
+					}
+				});
+			updatePlots(positiveSide, happyVal);
+		}
+
+		function reSelectHappyVal() {
+			
+			$('#spinHappy').spinner({min:0, max:5})
+				.spinner("value", happyVal);
+			
+			$('#happyValForm').dialog({ 
+				buttons: [{text:"OK", click: function() {
+					happyVal = $('#spinHappy').spinner("value");
+					happyText.text(happyVal);
+					updatePlots(positiveSide,happyVal);
+					$(this).dialog("close");
+				}}], 
+				modal:true, 
+				title:"Happiness Level"
+			});
+		}
+
+		function updatePlots(showPositiveSide, happinessVal) {
+			path0 = group.selectAll(".arc0")
+				.data(pie(hist0(dataIn.filter(function(d) {
+					if (showPositiveSide) {
+						return d.happiness > happinessVal;
+					} else {
+						return d.happiness <= happinessVal;
+					}
+				}))))
+				.transition()
+				.duration(2000)
+				.attrTween("d", arcTween0);
+
+			path1 = group.selectAll(".arc1")
+				.data(pie(hist1(dataIn.filter(function(d) {
+					if (showPositiveSide) {
+						return d.happiness > happinessVal;
+					} else {
+						return d.happiness <= happinessVal;
+					}
+				}))))
+				.transition()
+				.duration(2000)
+				.attrTween("d", arcTween1);
+
+			path2 = group.selectAll(".arc2")
+				.data(pie(hist2(dataIn.filter(function(d) {
+					if (showPositiveSide) {
+						return d.happiness > happinessVal;
+					} else {
+						return d.happiness <= happinessVal;
+					}
+				}))))
+				.transition()
+				.duration(2000)
+				.attrTween("d", arcTween2);
+
+			path3 = group.selectAll(".arc3")
+				.data(pie(hist3(dataIn.filter(function(d) {
+					if (showPositiveSide) {
+						return d.happiness > happinessVal;
+					} else {
+						return d.happiness <= happinessVal;
+					}
+				}))))
+				.transition()
+				.duration(2000)
+				.attrTween("d", arcTween3);
+		}
+
+		function arcTween0(a) {
+		  var i = d3.interpolate(this._current, a);
+		  this._current = i(0);
+		  return function(t) {
+		  	// some unexpected increment?
+		  	return arc0(i(t));
+		  };
+		}
+
+		function arcTween1(a) {
+		  var i = d3.interpolate(this._current, a);
+		  this._current = i(0);
+		  return function(t) {
+		  	// some unexpected increment?
+		  	return arc1(i(t));
+		  };
+		}
+
+		function arcTween2(a) {
+		  var i = d3.interpolate(this._current, a);
+		  this._current = i(0);
+		  return function(t) {
+		  	// some unexpected increment?
+		  	return arc2(i(t));
+		  };
+		}
+
+		function arcTween3(a) {
+		  var i = d3.interpolate(this._current, a);
+		  this._current = i(0);
+		  return function(t) {
+		  	// some unexpected increment?
+		  	return arc3(i(t));
+		  };
+		}
+	</script>
+
+	<script src="js/jquery-ui.js" type="text/javascript"></script>
+</body>
+</html>
